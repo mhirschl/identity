@@ -96,6 +96,11 @@ function init() {
         showRewardAnimation(e.detail.habitName);
     });
 
+    // Error listener
+    window.addEventListener('habit-error', (e) => {
+        showErrorToast(e.detail.message);
+    });
+
     // Sync Handlers
     syncStatusBtn.addEventListener('click', () => {
         syncModal.classList.add('active');
@@ -357,6 +362,17 @@ function updateSyncUI() {
         syncStatusBtn.style.opacity = '1';
         syncStatusBtn.innerHTML = '☁️ Synced';
         logoutBtn.style.display = 'block';
+
+        // Hide link section if already synced to avoid confusion
+        document.getElementById('link-device-section').style.display = 'none';
+    } else {
+        googleSyncBtn.style.display = 'flex';
+        enableSyncBtn.parentElement.style.display = 'block';
+        syncKeyDisplay.style.display = 'none';
+        syncStatusBtn.style.opacity = '0.5';
+        syncStatusBtn.innerHTML = '☁️ Sync';
+        logoutBtn.style.display = 'none';
+        document.getElementById('link-device-section').style.display = 'block';
     }
 }
 

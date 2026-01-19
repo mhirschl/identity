@@ -20,48 +20,47 @@ const SyncEngine = (() => {
     let auth;
     let currentUser = null;
 
-    function init() {
+    async function init() {
         if (typeof firebase === 'undefined') {
             console.warn("Firebase not loaded. Working in local-only mode.");
             return;
         }
 
         try {
-            firebase.initializeApp(firebaseConfig);
+            if (!firebase.apps.length) {
+                firebase.initializeApp(firebaseConfig);
+            }
             db = firebase.firestore();
             auth = firebase.auth();
 
-            // Check for bridged key
-            const bridgedKey = localStorage.getItem('identity_sync_key');
-            if (bridgedKey) {
-                // In this simple demo, we'll just act as that user
-                // For real security, we'd use a shared login or verified link
-                currentUser = { uid: bridgedKey };
-                console.log("Bridged session active:", bridgedKey);
-                startSync();
-                return;
+            // 1. Enable Persistence (The "Magic" part for offline sync)
+            try {
+                await db.enablePersistence({ synchronizeTabs: true });
+                console.log("Firestore persistence enabled (multi-tab sync active)");
+            } catch (err) {
+                if (err.code === 'failed-precondition') {
+                    console.warn("Multiple tabs open, persistence can only be enabled in one tab at a time.");
+                } else if (err.code === 'unimplemented') {
+                    console.warn("The current browser does not support persistence.");
+                }
             }
 
-            // Handle Redirect Result (for Google Login)
+            // 2. Handle Redirect Result (for Google Login)
             auth.getRedirectResult().then(result => {
                 if (result.user) {
-                    currentUser = result.user;
-                    console.log("Redirect login successful:", currentUser.uid);
-                    startSync();
+                    onUserAuthenticated(result.user);
                 }
             }).catch(e => {
                 console.error("Redirect Auth Error:", e);
-                // We'll show this via the UI if needed
             });
 
-            // Try to restore session or start anonymous
+            // 3. Listen for Auth State
             auth.onAuthStateChanged(user => {
                 if (user) {
-                    currentUser = user;
-                    console.log("Synced as:", user.uid);
-                    startSync();
-                    // Update UI if app.js is ready
-                    if (window.updateSyncUI) window.updateSyncUI();
+                    onUserAuthenticated(user);
+                } else {
+                    currentUser = null;
+                    window.IdentityStore.setCloudMode(false);
                 }
             });
         } catch (e) {
@@ -69,32 +68,54 @@ const SyncEngine = (() => {
         }
     }
 
-    async function loginWithGoogle() {
-        if (!auth) return { error: "Firebase not initialized. Check your config." };
-        if (firebaseConfig.apiKey.includes("MOCK")) {
-            return { error: "MOCK KEYS DETECTED: Update help in js/sync.js" };
+    async function onUserAuthenticated(user) {
+        currentUser = user;
+        console.log("Authenticated as:", user.uid);
+
+        // Let the store know we are in cloud mode
+        window.IdentityStore.setCloudMode(true, user.uid);
+
+        // One-time migration: If there are local habits and cloud is empty, migrate them
+        migrateLocalToCloud(user.uid);
+
+        // Update UI
+        if (window.updateSyncUI) window.updateSyncUI();
+    }
+
+    async function migrateLocalToCloud(uid) {
+        const localHabits = JSON.parse(localStorage.getItem('identity_habits')) || [];
+        if (localHabits.length === 0) return;
+
+        // Peak into cloud to see if it's empty
+        const snapshot = await db.collection('users').doc(uid).collection('habits').limit(1).get();
+        if (snapshot.empty) {
+            console.log("Cloud is empty. Migrating local habits...");
+            for (const habit of localHabits) {
+                await db.collection('users').doc(uid).collection('habits').doc(habit.id).set(habit);
+            }
+            // Clear local habits to prevent double-migration next time
+            localStorage.removeItem('identity_habits');
         }
+    }
+
+    async function loginWithGoogle() {
+        if (!auth) return { error: "Firebase not initialized." };
         try {
             const provider = new firebase.auth.GoogleAuthProvider();
-            // Using Redirect instead of Popup for better mobile/PWA support
             await auth.signInWithRedirect(provider);
             return { redirecting: true };
         } catch (e) {
             console.error("Google Auth Error:", e.code, e.message);
-            return { error: `Auth Error (${e.code}): ${e.message}` };
+            return { error: `Auth Error: ${e.message}` };
         }
     }
 
     async function loginAnonymous() {
-        if (!auth) return { error: "Firebase not initialized. Check your config." };
-        if (firebaseConfig.apiKey.includes("MOCK")) {
-            return { error: "MOCK KEYS DETECTED: You must replace the keys in sync.js with your own Firebase keys from the Google Console." };
-        }
+        if (!auth) return { error: "Firebase not initialized." };
         try {
             const result = await auth.signInAnonymously();
             return { user: result.user };
         } catch (e) {
-            console.error("Auth failed:", e);
             return { error: e.message };
         }
     }
@@ -102,54 +123,6 @@ const SyncEngine = (() => {
     async function logout() {
         if (!auth) return;
         await auth.signOut();
-        localStorage.removeItem('identity_sync_key');
-        location.reload();
-    }
-
-    function startSync() {
-        if (!currentUser || !db) return;
-
-        // 1. Initial Migration (Local -> Cloud)
-        pushLocalToCloud();
-
-        // 2. Subscribe to Local Store Changes
-        window.IdentityStore.subscribe(() => {
-            pushLocalToCloud();
-        });
-
-        // 3. Listen for Cloud Changes (Cloud -> Local)
-        db.collection('users').doc(currentUser.uid)
-            .collection('habits').onSnapshot(snapshot => {
-                const cloudHabits = [];
-                snapshot.forEach(doc => cloudHabits.push(doc.data()));
-
-                if (cloudHabits.length > 0) {
-                    // Check if we actually need to update to avoid loops
-                    const localStr = JSON.stringify(window.IdentityStore.habits);
-                    const cloudStr = JSON.stringify(cloudHabits.sort((a, b) => (a.order || 0) - (b.order || 0)));
-
-                    if (localStr !== cloudStr) {
-                        console.log("Sync: Updating from cloud...");
-                        window.IdentityStore.habits = cloudHabits;
-                        window.IdentityStore.notify(true); // true = fromSync
-                    }
-                }
-            });
-    }
-
-    function pushLocalToCloud() {
-        if (!currentUser || !db) return;
-        const habits = window.IdentityStore.habits;
-        habits.forEach(habit => {
-            db.collection('users').doc(currentUser.uid)
-                .collection('habits').doc(habit.id).set(habit, { merge: true });
-        });
-    }
-
-    async function bridgeDevice(syncKey) {
-        // This is a simplified concept. In a real app, we'd use Custom Tokens
-        // or a shared account, but for this demo, we'll store the 'activeUID'
-        localStorage.setItem('identity_sync_key', syncKey);
         location.reload();
     }
 
@@ -157,12 +130,18 @@ const SyncEngine = (() => {
         return currentUser ? currentUser.uid : null;
     }
 
+    // Helper for direct Firestore access from store
+    function getDB() { return db; }
+    function getUser() { return currentUser; }
+
     return {
         init,
         loginWithGoogle,
         loginAnonymous,
         logout,
-        getSyncKey
+        getSyncKey,
+        getDB,
+        getUser
     };
 })();
 

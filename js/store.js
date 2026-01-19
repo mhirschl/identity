@@ -5,8 +5,48 @@
 window.IdentityStore = (function () {
     class HabitStore {
         constructor() {
-            this.habits = JSON.parse(localStorage.getItem('habits')) || [];
+            this.habits = JSON.parse(localStorage.getItem('identity_habits')) || [];
             this.listeners = [];
+            this.isCloudMode = false;
+            this.userId = null;
+            this.unsubscribeCloud = null;
+        }
+
+        setCloudMode(active, uid = null) {
+            this.isCloudMode = active;
+            this.userId = uid;
+
+            if (active && uid) {
+                this.initCloudListener();
+            } else {
+                if (this.unsubscribeCloud) this.unsubscribeCloud();
+                this.habits = JSON.parse(localStorage.getItem('identity_habits')) || [];
+                this.notify();
+            }
+        }
+
+        initCloudListener() {
+            if (this.unsubscribeCloud) this.unsubscribeCloud();
+
+            const db = window.SyncEngine.getDB();
+            if (!db || !this.userId) return;
+
+            this.unsubscribeCloud = db.collection('users').doc(this.userId)
+                .collection('habits')
+                .onSnapshot(snapshot => {
+                    const cloudHabits = [];
+                    snapshot.forEach(doc => cloudHabits.push(doc.data()));
+
+                    // Sort by order
+                    this.habits = cloudHabits.sort((a, b) => (a.order || 0) - (b.order || 0));
+
+                    // Update cache for offline startup
+                    localStorage.setItem('identity_habits', JSON.stringify(this.habits));
+
+                    this.notify(true); // true = from sync
+                }, err => {
+                    console.error("Cloud listener error:", err);
+                });
         }
 
         subscribe(listener) {
@@ -17,7 +57,7 @@ window.IdentityStore = (function () {
         }
 
         notify(fromSync = false) {
-            if (!fromSync) this.save();
+            if (!this.isCloudMode && !fromSync) this.save();
             this.listeners.forEach(l => l(this.habits));
         }
 
@@ -25,63 +65,76 @@ window.IdentityStore = (function () {
             localStorage.setItem('identity_habits', JSON.stringify(this.habits));
         }
 
-        addHabit(habitData) {
+        async addHabit(habitData) {
+            const id = crypto.randomUUID();
             const newHabit = {
-                id: crypto.randomUUID(),
+                id: id,
                 created: new Date().toISOString(),
-                history: {}, // { "2026-01-18": "completed" | "skipped" }
+                history: {},
                 status: 'active',
-                skipBudget: 1, // Default skip budget
-                skipsUsed: {}, // { "2026-W03": 1 } - week-based tracking
+                skipBudget: 1,
+                skipsUsed: {},
                 pauseUntil: null,
                 frictionLog: {},
                 order: this.habits.length,
-                rewards: {
-                    probability: 0.2,
-                },
+                rewards: { probability: 0.2 },
                 ...habitData
             };
-            this.habits.push(newHabit);
-            this.notify();
-        }
 
-        updateHabit(id, updateData) {
-            const index = this.habits.findIndex(h => h.id === id);
-            if (index !== -1) {
-                this.habits[index] = { ...this.habits[index], ...updateData };
+            if (this.isCloudMode) {
+                const db = window.SyncEngine.getDB();
+                await db.collection('users').doc(this.userId).collection('habits').doc(id).set(newHabit);
+            } else {
+                this.habits.push(newHabit);
                 this.notify();
             }
         }
 
-        deleteHabit(id) {
-            this.habits = this.habits.filter(h => h.id !== id);
-            this.notify();
+        async updateHabit(id, updateData) {
+            if (this.isCloudMode) {
+                const db = window.SyncEngine.getDB();
+                await db.collection('users').doc(this.userId).collection('habits').doc(id).update(updateData);
+            } else {
+                const index = this.habits.findIndex(h => h.id === id);
+                if (index !== -1) {
+                    this.habits[index] = { ...this.habits[index], ...updateData };
+                    this.notify();
+                }
+            }
         }
 
-        reorderHabits(newOrder) {
-            // newOrder is an array of habit IDs in the desired order
-            const reorderedHabits = newOrder.map(id => this.habits.find(h => h.id === id));
-            this.habits = reorderedHabits.filter(Boolean).map((habit, index) => ({
-                ...habit,
-                order: index
-            }));
-            this.notify();
+        async deleteHabit(id) {
+            if (this.isCloudMode) {
+                const db = window.SyncEngine.getDB();
+                await db.collection('users').doc(this.userId).collection('habits').doc(id).delete();
+            } else {
+                this.habits = this.habits.filter(h => h.id !== id);
+                this.notify();
+            }
         }
 
-        toggleHabit(id, dateString) {
+        async toggleHabit(id, dateString) {
             const habit = this.habits.find(h => h.id === id);
             if (!habit) return;
 
-            if (habit.history[dateString] === 'completed') {
-                delete habit.history[dateString];
+            const newHistory = { ...habit.history };
+            if (newHistory[dateString] === 'completed') {
+                delete newHistory[dateString];
             } else {
-                habit.history[dateString] = 'completed';
+                newHistory[dateString] = 'completed';
                 this.checkReward(habit);
             }
-            this.notify();
+
+            if (this.isCloudMode) {
+                const db = window.SyncEngine.getDB();
+                await db.collection('users').doc(this.userId).collection('habits').doc(id).update({ history: newHistory });
+            } else {
+                habit.history = newHistory;
+                this.notify();
+            }
         }
 
-        skipHabit(id, dateString) {
+        async skipHabit(id, dateString) {
             const habit = this.habits.find(h => h.id === id);
             if (!habit) return;
 
@@ -89,9 +142,20 @@ window.IdentityStore = (function () {
             const skipsUsed = habit.skipsUsed[weekKey] || 0;
 
             if (skipsUsed < habit.skipBudget) {
-                habit.history[dateString] = 'skipped';
-                habit.skipsUsed[weekKey] = skipsUsed + 1;
-                this.notify();
+                const newHistory = { ...habit.history, [dateString]: 'skipped' };
+                const newSkipsUsed = { ...habit.skipsUsed, [weekKey]: skipsUsed + 1 };
+
+                if (this.isCloudMode) {
+                    const db = window.SyncEngine.getDB();
+                    await db.collection('users').doc(this.userId).collection('habits').doc(id).update({
+                        history: newHistory,
+                        skipsUsed: newSkipsUsed
+                    });
+                } else {
+                    habit.history = newHistory;
+                    habit.skipsUsed = newSkipsUsed;
+                    this.notify();
+                }
             } else {
                 window.dispatchEvent(new CustomEvent('habit-error', {
                     detail: { message: "Skip budget exhausted for this week!" }
@@ -110,7 +174,6 @@ window.IdentityStore = (function () {
 
         checkReward(habit) {
             if (Math.random() < habit.rewards.probability) {
-                // Trigger event for UI to handle
                 window.dispatchEvent(new CustomEvent('habit-reward', {
                     detail: { habitName: habit.name }
                 }));
@@ -152,12 +215,11 @@ window.IdentityStore = (function () {
             const todayStr = checkDate.toISOString().split('T')[0];
             const todayStatus = habit.history[todayStr];
 
-            // If not completed or skipped today, start checking from yesterday
             if (todayStatus !== 'completed' && todayStatus !== 'skipped') {
                 checkDate.setDate(checkDate.getDate() - 1);
             }
 
-            while (true) {
+            while (streak < 1000) { // Safety break
                 const dateStr = checkDate.toISOString().split('T')[0];
                 const status = habit.history[dateStr];
 
