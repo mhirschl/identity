@@ -1,367 +1,365 @@
-const store = window.IdentityStore;
+import React, { useState, useEffect, useMemo } from 'react';
+import { createRoot } from 'react-dom';
+import { createClient } from '@supabase/supabase-js';
+import {
+    Plus,
+    Flame,
+    Calendar,
+    Settings,
+    Check,
+    Trash2,
+    X,
+    Cloud,
+    CloudOff,
+    LogOut,
+    ChevronRight,
+    UserCircle
+} from 'lucide-react';
 
-const habitListEl = document.getElementById('habit-list');
-const addHabitBtn = document.getElementById('add-habit-btn');
-const modalOverlay = document.getElementById('modal-overlay');
-const saveHabitBtn = document.getElementById('save-habit-btn');
-const deleteHabitBtn = document.getElementById('delete-habit-btn');
-const cancelBtn = document.getElementById('cancel-btn');
-const modalTitle = document.getElementById('modal-title');
-const habitIdInput = document.getElementById('habit-id');
+/**
+ * IDENTITY V2 - THE RELIABILITY STACK
+ */
 
-// Tabs
-const tabs = document.querySelectorAll('.tab');
-const tabContents = document.querySelectorAll('.tab-content');
+// Supabase Configuration
+const SUPABASE_URL = localStorage.getItem('id_v2_sb_url') || '';
+const SUPABASE_KEY = localStorage.getItem('id_v2_sb_key') || '';
+const supabase = (SUPABASE_URL && SUPABASE_KEY) ? createClient(SUPABASE_URL, SUPABASE_KEY) : null;
 
-// Form inputs
-const identityInput = document.getElementById('habit-identity');
-const nameInput = document.getElementById('habit-name');
-const anchorInput = document.getElementById('habit-anchor');
+// --- App Component ---
 
-// Sync UI
-const syncStatusBtn = document.getElementById('sync-status');
-const syncModal = document.getElementById('sync-modal');
-const closeSyncBtn = document.getElementById('close-sync-btn');
+function IdentityApp() {
+    const [habits, setHabits] = useState([]);
+    const [user, setUser] = useState(null);
+    const [isConfigModalOpen, setIsConfigModalOpen] = useState(!supabase);
+    const [isAddModalOpen, setIsAddModalOpen] = useState(false);
+    const [activeTab, setActiveTab] = useState('today');
+    const [newHabit, setNewHabit] = useState({ name: '', identity: '', anchor: '' });
 
-function init() {
-    render();
-    store.subscribe(render);
-    checkReflection();
+    // 1. Auth Listener
+    useEffect(() => {
+        if (!supabase) return;
 
-    // Register Service Worker
-    if ('serviceWorker' in navigator) {
-        navigator.serviceWorker.register('./sw.js')
-            .then(() => console.log('Service Worker Registered'));
-    }
-
-    // Tab switching
-    tabs.forEach(tab => {
-        tab.addEventListener('click', () => {
-            tabs.forEach(t => t.classList.remove('active'));
-            tabContents.forEach(c => c.classList.remove('active'));
-            tab.classList.add('active');
-            document.getElementById(`${tab.dataset.tab}-view`).classList.add('active');
+        supabase.auth.getSession().then(({ data: { session } }) => {
+            setUser(session?.user ?? null);
         });
-    });
 
-    addHabitBtn.addEventListener('click', () => {
-        modalTitle.innerText = "New Habit";
-        habitIdInput.value = "";
-        deleteHabitBtn.style.display = "none";
-        modalOverlay.classList.add('active');
-        identityInput.focus();
-    });
+        const { data: { subscription } } = supabase.auth.onAuthStateChanged((_event, session) => {
+            setUser(session?.user ?? null);
+        });
 
-    cancelBtn.addEventListener('click', () => {
-        modalOverlay.classList.remove('active');
-        clearForm();
-    });
+        return () => subscription.unsubscribe();
+    }, []);
 
-    saveHabitBtn.addEventListener('click', () => {
-        const id = habitIdInput.value;
-        const identity = identityInput.value.trim();
-        const name = nameInput.value.trim();
-        const anchor = anchorInput.value.trim();
-
-        if (identity && name && anchor) {
-            if (id) {
-                store.updateHabit(id, { identity, name, anchor });
-            } else {
-                store.addHabit({ identity, name, anchor });
-            }
-            modalOverlay.classList.remove('active');
-            clearForm();
-        }
-    });
-
-    deleteHabitBtn.addEventListener('click', () => {
-        const id = habitIdInput.value;
-        if (id && confirm("Delete this habit and all history?")) {
-            store.deleteHabit(id);
-            modalOverlay.classList.remove('active');
-            clearForm();
-        }
-    });
-
-    // Reward listener
-    window.addEventListener('habit-reward', (e) => {
-        showRewardAnimation(e.detail.habitName);
-    });
-
-    // Error listener
-    window.addEventListener('habit-error', (e) => {
-        showErrorToast(e.detail.message);
-    });
-
-    // Sync Modal Controls
-    syncStatusBtn.addEventListener('click', () => {
-        syncModal.classList.add('active');
-        updateSyncUI();
-    });
-
-    closeSyncBtn.addEventListener('click', () => {
-        syncModal.classList.remove('active');
-    });
-
-    // GitHub Sync Handlers
-    const githubTokenInput = document.getElementById('github-token-input');
-    const githubConnectBtn = document.getElementById('github-connect-btn');
-    const githubLogoutBtn = document.getElementById('github-logout-btn');
-    const githubAuthSection = document.getElementById('github-auth-section');
-    const githubStatusSection = document.getElementById('github-status-section');
-
-    githubConnectBtn.addEventListener('click', async () => {
-        const token = githubTokenInput.value.trim();
-        if (!token) {
-            showErrorToast("Please enter a GitHub Token");
+    // 2. Real-time Subscription
+    useEffect(() => {
+        if (!supabase || !user) {
+            // Load local fallback if not logged in
+            const localHabits = JSON.parse(localStorage.getItem('id_v2_habits') || '[]');
+            setHabits(localHabits);
             return;
         }
 
-        githubConnectBtn.innerText = "Connecting...";
-        const result = await window.SyncEngine.connect(token);
+        const fetchHabits = async () => {
+            const { data, error } = await supabase
+                .from('habits')
+                .select('*')
+                .order('created_at', { ascending: true });
+            if (data) setHabits(data);
+        };
 
-        if (result.success) {
-            updateSyncUI();
-            githubTokenInput.value = '';
+        fetchHabits();
+
+        const channel = supabase
+            .channel('habits_changes')
+            .on('postgres_changes', { event: '*', schema: 'public', table: 'habits' }, payload => {
+                fetchHabits();
+            })
+            .subscribe();
+
+        return () => supabase.removeChannel(channel);
+    }, [user]);
+
+    // 3. Actions
+    const addHabit = async (e) => {
+        e.preventDefault();
+        const habitData = {
+            ...newHabit,
+            user_id: user?.id,
+            history: {},
+            created_at: new Date().toISOString()
+        };
+
+        if (user && supabase) {
+            await supabase.from('habits').insert([habitData]);
         } else {
-            githubConnectBtn.innerText = "Connect GitHub";
-            showErrorToast(result.error);
+            const updated = [...habits, { ...habitData, id: Math.random().toString(36).substr(2, 9) }];
+            setHabits(updated);
+            localStorage.setItem('id_v2_habits', JSON.stringify(updated));
         }
-    });
 
-    githubLogoutBtn.addEventListener('click', () => {
-        if (confirm("Logout from GitHub sync?")) {
-            window.SyncEngine.logout();
+        setNewHabit({ name: '', identity: '', anchor: '' });
+        setIsAddModalOpen(false);
+    };
+
+    const toggleHabit = async (id, date) => {
+        const habit = habits.find(h => h.id === id);
+        if (!habit) return;
+
+        const newHistory = { ...habit.history };
+        if (newHistory[date]) {
+            delete newHistory[date];
+        } else {
+            newHistory[date] = 'completed';
         }
-    });
-}
 
-function render() {
-    const habits = store.getHabitsForToday();
+        if (user && supabase) {
+            await supabase.from('habits').update({ history: newHistory }).eq('id', id);
+        } else {
+            const updated = habits.map(h => h.id === id ? { ...h, history: newHistory } : h);
+            setHabits(updated);
+            localStorage.setItem('id_v2_habits', JSON.stringify(updated));
+        }
+    };
+
     const today = new Date().toISOString().split('T')[0];
 
-    if (habits.length === 0) {
-        habitListEl.innerHTML = `
-      <div class="habit-placeholder" style="text-align: center; padding: 3rem 1rem; color: var(--text-dim);">
-        <p>Tap + to start becoming who you want to be.</p>
-      </div>
-    `;
-        return;
-    }
+    return (
+        <div className="max-w-md mx-auto px-4 pt-8 pb-24 min-h-screen">
+            <header className="flex justify-between items-center mb-8">
+                <div>
+                    <h1 className="text-3xl font-bold tracking-tight text-white mb-1">Identity</h1>
+                    <p className="text-gray-400 text-sm">Become who you want to be.</p>
+                </div>
+                <button
+                    onClick={() => setIsConfigModalOpen(true)}
+                    className="p-2 rounded-full glass-card hover:bg-white/10 transition-colors"
+                >
+                    {supabase ? <Cloud className="w-5 h-5 text-indigo-400" /> : <CloudOff className="w-5 h-5 text-gray-500" />}
+                </button>
+            </header>
 
-    habitListEl.innerHTML = habits.map(habit => `
-    <div class="habit-item glass-card ${habit.isCompletedToday ? 'completed' : ''} ${habit.isSkippedToday ? 'skipped' : ''}" data-id="${habit.id}">
-      <div class="habit-info">
-        <h3>${habit.name} ${habit.streak > 0 ? `<span style="font-size: 0.8rem; color: var(--primary-glow); margin-left: 0.5rem;">🔥 ${habit.streak}</span>` : ''}</h3>
-        <p>${habit.identity} • ${habit.anchor}</p>
-        ${habit.missedYesterday && !habit.isCompletedToday && !habit.isSkippedToday ? `<p style="color: #f87171; font-size: 0.7rem; margin-top: 0.25rem;">⚠️ Never miss twice! Do it today.</p>` : ''}
-      </div>
-      <div class="habit-actions">
-        ${!habit.isCompletedToday && !habit.isSkippedToday && habit.skipsRemaining > 0 && !habit.isPaused ? `
-            <button class="action-btn skip-btn" title="Skip (Budget: ${habit.skipsRemaining})">Skip</button>
-        ` : ''}
-        ${!habit.isPaused ? `
-            <button class="action-btn pause-btn" title="Pause habit">Pause</button>
-        ` : `<button class="action-btn resume-btn" title="Resume habit">Paused</button>`}
-        <button class="action-btn edit-btn" title="Edit habit">•••</button>
-        <button class="check-btn" aria-label="Mark completed">
-            ${habit.isCompletedToday ? '✓' : ''}
-        </button>
-      </div>
-      ${habit.missedYesterday && !habit.isCompletedToday && !habit.isSkippedToday ? `
-          <div class="friction-prompt" style="margin-top: 1rem; padding: 0.75rem; background: rgba(255,255,255,0.05); border-radius: 12px;">
-            <p style="font-size: 0.7rem; color: var(--text-dim); margin-bottom: 0.5rem;">WHAT WAS THE FRICTION YESTERDAY?</p>
-            <input type="text" class="friction-input" placeholder="e.g. Too tired, no time..." style="width: 100%; background: none; border: none; border-bottom: 1px solid var(--glass-border); color: white; font-size: 0.8rem;">
-          </div>
-      ` : ''}
-    </div>
-  `).join('');
+            {/* Tabs */}
+            <div className="flex gap-2 mb-8 glass-card p-1 rounded-2xl">
+                <button
+                    onClick={() => setActiveTab('today')}
+                    className={`flex-1 py-2 rounded-xl text-sm font-semibold transition-all ${activeTab === 'today' ? 'bg-white/10 text-white shadow-sm' : 'text-gray-400'}`}
+                >
+                    Today
+                </button>
+                <button
+                    onClick={() => setActiveTab('journey')}
+                    className={`flex-1 py-2 rounded-xl text-sm font-semibold transition-all ${activeTab === 'journey' ? 'bg-white/10 text-white shadow-sm' : 'text-gray-400'}`}
+                >
+                    Journey
+                </button>
+            </div>
 
-    // Add click listeners
-    document.querySelectorAll('.habit-item').forEach(el => {
-        const id = el.dataset.id;
-        const habit = habits.find(h => h.id === id);
+            {/* List */}
+            {activeTab === 'today' && (
+                <div className="space-y-4">
+                    {habits.length === 0 ? (
+                        <div className="text-center py-20">
+                            <Plus className="w-12 h-12 text-gray-700 mx-auto mb-4" />
+                            <p className="text-gray-500 font-medium">No habits yet. Tap + to start.</p>
+                        </div>
+                    ) : (
+                        habits.map(habit => (
+                            <div
+                                key={habit.id}
+                                className={`habit-item p-4 rounded-3xl glass-card transition-all flex items-center gap-4 ${habit.history[today] ? 'completed ring-1 ring-emerald-500/30' : ''}`}
+                            >
+                                <div className="flex-1">
+                                    <h3 className="font-semibold text-lg leading-tight flex items-center gap-2">
+                                        {habit.name}
+                                        <StreakCounter habit={habit} />
+                                    </h3>
+                                    <p className="text-gray-400 text-sm leading-snug">
+                                        {habit.identity} <span className="opacity-30 mx-1">•</span> {habit.anchor}
+                                    </p>
+                                </div>
+                                <button
+                                    onClick={() => toggleHabit(habit.id, today)}
+                                    className={`w-12 h-12 rounded-2xl flex items-center justify-center transition-all ${habit.history[today] ? 'bg-emerald-500 text-white scale-95' : 'bg-white/5 border border-white/10 text-transparent hover:border-emerald-500/50 hover:text-emerald-500/50'}`}
+                                >
+                                    <Check className="w-6 h-6" />
+                                </button>
+                            </div>
+                        ))
+                    )}
+                </div>
+            )}
 
-        el.querySelector('.check-btn').addEventListener('click', (e) => {
-            e.stopPropagation();
-            store.toggleHabit(id, today);
-        });
+            {activeTab === 'journey' && (
+                <div className="glass-card rounded-3xl p-6 text-center py-20">
+                    <Calendar className="w-12 h-12 text-indigo-400 mx-auto mb-4" />
+                    <h3 className="text-xl font-bold mb-2">Your Journey</h3>
+                    <p className="text-gray-400">Detailed visualizations coming soon.</p>
+                </div>
+            )}
 
-        el.querySelector('.edit-btn').addEventListener('click', (e) => {
-            e.stopPropagation();
-            openEditModal(habit);
-        });
+            {/* FAB */}
+            <button
+                onClick={() => setIsAddModalOpen(true)}
+                className="fixed bottom-8 right-8 w-16 h-16 bg-gradient-to-tr from-indigo-500 to-indigo-600 rounded-full shadow-lg shadow-indigo-500/20 flex items-center justify-center text-white active:scale-95 transition-transform z-40"
+            >
+                <Plus className="w-8 h-8" />
+            </button>
 
-        const skipBtn = el.querySelector('.skip-btn');
-        if (skipBtn) {
-            skipBtn.addEventListener('click', (e) => {
-                e.stopPropagation();
-                store.skipHabit(id, today);
-            });
-        }
+            {/* Modal: Config */}
+            {isConfigModalOpen && <ConfigModal onClose={() => setIsConfigModalOpen(false)} user={user} />}
 
-        const pauseBtn = el.querySelector('.pause-btn');
-        if (pauseBtn) {
-            pauseBtn.addEventListener('click', (e) => {
-                e.stopPropagation();
-                const resumption = prompt("Pause until (YYYY-MM-DD)?", new Date(Date.now() + 86400000 * 7).toISOString().split('T')[0]);
-                if (resumption) store.updateHabit(id, { pauseUntil: resumption });
-            });
-        }
-
-        const resumeBtn = el.querySelector('.resume-btn');
-        if (resumeBtn) {
-            resumeBtn.addEventListener('click', (e) => {
-                e.stopPropagation();
-                store.updateHabit(id, { pauseUntil: null });
-            });
-        }
-
-        const frictionInput = el.querySelector('.friction-input');
-        if (frictionInput) {
-            frictionInput.addEventListener('change', (e) => {
-                const habitClone = JSON.parse(JSON.stringify(habit));
-                habitClone.frictionLog[yesterday] = e.target.value;
-                store.updateHabit(id, { frictionLog: habitClone.frictionLog });
-            });
-        }
-    });
-
-    renderJourney();
+            {/* Modal: Add Habit */}
+            {isAddModalOpen && (
+                <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+                    <div className="glass-card w-full max-w-sm rounded-3xl p-8 animate-in slide-in-from-bottom duration-300">
+                        <div className="flex justify-between items-center mb-6">
+                            <h2 className="text-2xl font-bold">New Habit</h2>
+                            <button onClick={() => setIsAddModalOpen(false)}><X className="text-gray-500" /></button>
+                        </div>
+                        <form onSubmit={addHabit} className="space-y-6">
+                            <div>
+                                <label className="block text-xs font-bold text-gray-500 uppercase tracking-widest mb-2">Who do you want to become?</label>
+                                <input
+                                    required
+                                    placeholder="e.g. A focused reader"
+                                    className="w-full bg-white/5 border border-white/10 rounded-2xl px-4 py-3 focus:border-indigo-500 outline-none transition-all"
+                                    value={newHabit.identity}
+                                    onChange={e => setNewHabit({ ...newHabit, identity: e.target.value })}
+                                />
+                            </div>
+                            <div>
+                                <label className="block text-xs font-bold text-gray-500 uppercase tracking-widest mb-2">The Tiny Action</label>
+                                <input
+                                    required
+                                    placeholder="e.g. Read 1 page"
+                                    className="w-full bg-white/5 border border-white/10 rounded-2xl px-4 py-3 focus:border-indigo-500 outline-none transition-all"
+                                    value={newHabit.name}
+                                    onChange={e => setNewHabit({ ...newHabit, name: e.target.value })}
+                                />
+                            </div>
+                            <div>
+                                <label className="block text-xs font-bold text-gray-500 uppercase tracking-widest mb-2">The Anchor Trigger</label>
+                                <input
+                                    required
+                                    placeholder="e.g. After I pour my coffee"
+                                    className="w-full bg-white/5 border border-white/10 rounded-2xl px-4 py-3 focus:border-indigo-500 outline-none transition-all"
+                                    value={newHabit.anchor}
+                                    onChange={e => setNewHabit({ ...newHabit, anchor: e.target.value })}
+                                />
+                            </div>
+                            <button type="submit" className="w-full bg-indigo-600 text-white font-bold py-4 rounded-2xl shadow-lg shadow-indigo-600/20 active:scale-95 transition-all">
+                                Save Habit
+                            </button>
+                        </form>
+                    </div>
+                </div>
+            )}
+        </div>
+    );
 }
 
-function renderJourney() {
-    const journeyEl = document.getElementById('journey-view');
-    const habits = store.habits;
+// --- Helper Components ---
 
-    if (habits.length === 0) {
-        journeyEl.innerHTML = `
-            <h2 style="font-size: 0.9rem; color: var(--text-dim); text-transform: uppercase;">Your Journey</h2>
-            <div class="glass-card" style="padding: 2rem; text-align: center;">
-                <p style="color: var(--text-dim);">Start a habit to see your journey unfold.</p>
-            </div>
-        `;
-        return;
-    }
+function StreakCounter({ habit }) {
+    const streak = useMemo(() => {
+        let count = 0;
+        let d = new Date();
+        while (count < 365) {
+            const dateStr = d.toISOString().split('T')[0];
+            if (habit.history[dateStr] === 'completed') {
+                count++;
+                d.setDate(d.getDate() - 1);
+            } else if (dateStr === new Date().toISOString().split('T')[0]) {
+                d.setDate(d.getDate() - 1); // Ignore today if not done yet
+            } else {
+                break;
+            }
+        }
+        return count;
+    }, [habit.history]);
 
-    // Basic heatmap/timeline placeholder
-    journeyEl.innerHTML = `
-        <h2 style="font-size: 0.9rem; color: var(--text-dim); text-transform: uppercase;">Your Journey</h2>
-        <div class="glass-card">
-            <h3 style="margin-bottom: 1rem; font-size: 1rem;">Habit Consistency</h3>
-            <div class="heatmap" style="display: flex; gap: 4px; flex-wrap: wrap;">
-                ${generateHeatmapHTML(habits)}
+    if (streak === 0) return null;
+    return (
+        <span className="flex items-center gap-1 text-orange-400 text-sm font-bold bg-orange-400/10 px-2 py-0.5 rounded-full">
+            <Flame className="w-3.5 h-3.5 fill-current" />
+            {streak}
+        </span>
+    );
+}
+
+function ConfigModal({ onClose, user }) {
+    const [url, setUrl] = useState(localStorage.getItem('id_v2_sb_url') || '');
+    const [key, setKey] = useState(localStorage.getItem('id_v2_sb_key') || '');
+
+    const save = () => {
+        localStorage.setItem('id_v2_sb_url', url);
+        localStorage.setItem('id_v2_sb_key', key);
+        location.reload();
+    };
+
+    return (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
+            <div className="glass-card w-full max-w-sm rounded-[40px] p-8">
+                <div className="flex justify-between items-center mb-6">
+                    <h2 className="text-2xl font-bold">Cloud Sync</h2>
+                    <button onClick={onClose}><X className="text-gray-500" /></button>
+                </div>
+
+                {user ? (
+                    <div className="text-center py-6">
+                        <div className="w-20 h-20 bg-emerald-500/20 rounded-full flex items-center justify-center mx-auto mb-4">
+                            <Check className="w-10 h-10 text-emerald-500" />
+                        </div>
+                        <p className="font-bold text-lg mb-1">Authenticated</p>
+                        <p className="text-gray-500 text-sm mb-6">{user.email}</p>
+                        <button
+                            onClick={() => supabase.auth.signOut().then(() => location.reload())}
+                            className="w-full py-3 rounded-2xl bg-white/5 border border-white/10 text-red-400 font-bold hover:bg-red-400/10 transition-colors"
+                        >
+                            Sign Out
+                        </button>
+                    </div>
+                ) : (
+                    <div className="space-y-6">
+                        <p className="text-gray-400 text-sm">Provide your Supabase credentials to enable cross-device synchronization.</p>
+                        <div className="space-y-4">
+                            <input
+                                placeholder="Supabase URL"
+                                className="w-full bg-white/5 border border-white/10 rounded-2xl px-4 py-3 outline-none"
+                                value={url}
+                                onChange={e => setUrl(e.target.value)}
+                            />
+                            <input
+                                type="password"
+                                placeholder="Supabase Anon Key"
+                                className="w-full bg-white/5 border border-white/10 rounded-2xl px-4 py-3 outline-none"
+                                value={key}
+                                onChange={e => setKey(e.target.value)}
+                            />
+                        </div>
+                        <button
+                            onClick={save}
+                            className="w-full bg-white text-black font-bold py-4 rounded-2xl active:scale-95 transition-all"
+                        >
+                            Connect & Reload
+                        </button>
+
+                        {supabase && (
+                            <button
+                                onClick={() => supabase.auth.signInWithOAuth({ provider: 'google' })}
+                                className="w-full flex items-center justify-center gap-2 py-4 rounded-2xl border border-white/10 hover:bg-white/5 transition-all font-semibold"
+                            >
+                                <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" width="18" height="18" />
+                                Login with Google
+                            </button>
+                        )}
+                    </div>
+                )}
             </div>
         </div>
-    `;
+    );
 }
 
-function generateHeatmapHTML(habits) {
-    // Generate 28 days of history
-    let html = '';
-    const today = new Date();
-    for (let i = 27; i >= 0; i--) {
-        const d = new Date(today);
-        d.setDate(d.getDate() - i);
-        const dateStr = d.toISOString().split('T')[0];
-
-        let status = 'none';
-        habits.forEach(h => {
-            if (h.history[dateStr] === 'completed') status = 'completed';
-            else if (h.history[dateStr] === 'skipped' && status !== 'completed') status = 'skipped';
-        });
-
-        const color = status === 'completed' ? 'var(--secondary-glow)' :
-            status === 'skipped' ? 'var(--primary-glow)' : 'var(--glass-border)';
-        const opacity = status === 'none' ? '0.2' : '1';
-
-        html += `<div style="width: 12px; height: 12px; background: ${color}; border-radius: 2px; opacity: ${opacity};" title="${dateStr}"></div>`;
-    }
-    return html;
-}
-
-function openEditModal(habit) {
-    modalTitle.innerText = "Edit Habit";
-    habitIdInput.value = habit.id;
-    identityInput.value = habit.identity;
-    nameInput.value = habit.name;
-    anchorInput.value = habit.anchor;
-    deleteHabitBtn.style.display = "block";
-    modalOverlay.classList.add('active');
-}
-
-function clearForm() {
-    identityInput.value = '';
-    nameInput.value = '';
-    anchorInput.value = '';
-}
-
-function showRewardAnimation(name) {
-    const toast = document.createElement('div');
-    toast.className = 'glass-card animate-pop';
-    toast.style.position = 'fixed';
-    toast.style.top = '2rem';
-    toast.style.left = '50%';
-    toast.style.transform = 'translateX(-50%)';
-    toast.style.zIndex = '1000';
-    toast.style.background = 'var(--secondary-glow)';
-    toast.style.color = 'var(--bg-dark)';
-    toast.style.fontWeight = 'bold';
-    toast.style.padding = '1rem 2rem';
-    toast.innerHTML = `🌟 Rare Reward Unlocked: ${name} mastery!`;
-
-    document.body.appendChild(toast);
-    setTimeout(() => toast.remove(), 3000);
-}
-
-function showErrorToast(message) {
-    const toast = document.createElement('div');
-    toast.className = 'glass-card animate-pop error-toast';
-    toast.style.position = 'fixed';
-    toast.style.top = '2rem';
-    toast.style.left = '50%';
-    toast.style.transform = 'translateX(-50%)';
-    toast.style.zIndex = '1000';
-    toast.style.padding = '1rem 2rem';
-    toast.innerHTML = `⚠️ ${message}`;
-
-    document.body.appendChild(toast);
-    setTimeout(() => toast.remove(), 3000);
-}
-
-function updateSyncUI() {
-    // Re-select elements in case they were removed/added (or just use local references if possible)
-    const githubAuthSection = document.getElementById('github-auth-section');
-    const githubStatusSection = document.getElementById('github-status-section');
-
-    if (window.SyncEngine.isConnected()) {
-        githubAuthSection.style.display = 'none';
-        githubStatusSection.style.display = 'block';
-        syncStatusBtn.style.opacity = '1';
-        syncStatusBtn.innerHTML = '☁️ Synced';
-    } else {
-        githubAuthSection.style.display = 'block';
-        githubStatusSection.style.display = 'none';
-        syncStatusBtn.style.opacity = '0.5';
-        syncStatusBtn.innerHTML = '☁️ Sync';
-    }
-}
-
-function checkReflection() {
-    const today = new Date();
-    if (today.getDay() === 0) { // Sunday
-        const weekKey = store.getWeekKey(today);
-        const lastRef = localStorage.getItem('last_reflection');
-        if (lastRef !== weekKey) {
-            setTimeout(() => {
-                const thought = prompt("Sunday Reflection: Is your current tiny habit still serving the person you want to become?");
-                if (thought !== null) {
-                    localStorage.setItem('last_reflection', weekKey);
-                    showRewardAnimation("Mindful Reflection");
-                }
-            }, 2000);
-        }
-    }
-}
-
-document.addEventListener('DOMContentLoaded', init);
+// Boot
+const root = createRoot(document.getElementById('root'));
+root.render(<IdentityApp />);

@@ -2,129 +2,94 @@
 <html lang="en">
 
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>Identity - Habit Manager</title>
-  <link rel="stylesheet" href="css/style.css">
-  <link rel="manifest" href="manifest.json">
-  <link rel="apple-touch-icon" href="assets/icon-192.png">
-  <meta name="theme-color" content="#0a0a0c">
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Identity v2 - Become Who You Are</title>
+
+    <!-- Tailwind CSS Play CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        bgDark: '#0a0a0c',
+                        primaryGlow: '#6366f1',
+                        secondaryGlow: '#10b981',
+                        glass: 'rgba(255, 255, 255, 0.03)',
+                        glassBorder: 'rgba(255, 255, 255, 0.1)',
+                    },
+                    backgroundImage: {
+                        'gradient-radial': 'radial-gradient(var(--tw-gradient-stops))',
+                    }
+                }
+            }
+        }
+    </script>
+    <style type="text/css">
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600&family=Outfit:wght@300;500;700&display=swap');
+
+        :root {
+            --bg-dark: #0a0a0c;
+        }
+
+        body {
+            background-color: var(--bg-dark);
+            color: white;
+            font-family: 'Inter', sans-serif;
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        h1,
+        h2,
+        .font-heading {
+            font-family: 'Outfit', sans-serif;
+        }
+
+        .glass-card {
+            background: rgba(255, 255, 255, 0.03);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .glow-shadow {
+            box-shadow: 0 0 20px rgba(99, 102, 241, 0.2);
+        }
+
+        .habit-item.completed {
+            background: rgba(16, 185, 129, 0.05);
+            border-color: rgba(16, 185, 129, 0.2);
+        }
+
+        /* PWA styles */
+        .safe-area-bottom {
+            padding-bottom: env(safe-area-inset-bottom);
+        }
+    </style>
+
+    <link rel="manifest" href="manifest.json">
+    <link rel="apple-touch-icon" href="assets/icon-192.png">
+    <meta name="theme-color" content="#0a0a0c">
 </head>
 
-<body>
-  <div class="app-container">
-    <header>
-      <h1>Identity</h1>
-      <div id="sync-status" class="status-indicator" style="cursor: pointer; opacity: 0.5;">☁️ Sync</div>
-      <div id="stats" class="status-indicator"></div>
-    </header>
+<body class="min-h-screen selection:bg-indigo-500/30">
+    <div id="root"></div>
 
-    <nav class="tabs">
-      <div class="tab active" data-tab="today">Today</div>
-      <div class="tab" data-tab="journey">Journey</div>
-    </nav>
+    <!-- React & Dependencies via ESM -->
+    <script type="importmap">
+    {
+      "imports": {
+        "react": "https://esm.sh/react@18.2.0",
+        "react-dom": "https://esm.sh/react-dom@18.2.0/client",
+        "@supabase/supabase-js": "https://esm.sh/@supabase/supabase-js@2.38.4",
+        "lucide-react": "https://esm.sh/lucide-react@0.292.0",
+        "framer-motion": "https://esm.sh/framer-motion@10.16.4"
+      }
+    }
+    </script>
 
-    <main>
-      <section id="today-view" class="tab-content active">
-        <h2
-          style="margin-bottom: 1rem; font-size: 0.9rem; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.05em;">
-          Today's Intentions</h2>
-        <div id="habit-list" class="habit-list">
-          <!-- Sync Modal -->
-          <div id="sync-modal" class="overlay">
-            <div class="modal glass-card">
-              <h2 style="margin-bottom: 1rem;">Cross-Device Sync</h2>
-              <p style="color: var(--text-dim); font-size: 0.9rem; margin-bottom: 1.5rem;">
-                Sync your habits between your laptop and Pixel 10.
-              </p>
-
-              <div id="sync-info" style="margin-bottom: 2rem;">
-                <p style="color: var(--text-dim); font-size: 0.8rem; margin-bottom: 1rem;">
-                  Your habits will be stored in your private GitHub repo `identity`.
-                </p>
-                <div id="github-auth-section">
-                  <input type="password" id="github-token-input" placeholder="Enter GitHub Token..."
-                    style="width: 100%; padding: 0.75rem; background: rgba(255,255,255,0.05); border: 1px solid var(--glass-border); border-radius: 12px; color: white; margin-bottom: 1rem;">
-                  <button id="github-connect-btn"
-                    style="width: 100%; padding: 0.75rem; background: #24292e; border: none; border-radius: 12px; color: white; font-weight: 600; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 0.5rem;">
-                    <img src="https://github.githubassets.com/images/modules/logos_page/GitHub-Mark.png" width="18"
-                      height="18" style="filter: invert(1);" alt="GH">
-                    Connect GitHub
-                  </button>
-                </div>
-                <div id="github-status-section" style="display: none; text-align: center;">
-                  <p style="color: #4ade80; font-weight: 600; margin-bottom: 1rem;">✓ Connected to GitHub</p>
-                  <button id="github-logout-btn"
-                    style="background: none; border: none; color: #f87171; font-size: 0.8rem; cursor: pointer; text-decoration: underline;">Logout</button>
-                </div>
-              </div>
-
-              <div style="display: flex; justify-content: flex-end; align-items: center; margin-top: 1rem;">
-                <button id="close-sync-btn"
-                  style="padding: 0.75rem 1.5rem; background: none; border: 1px solid var(--glass-border); border-radius: 12px; color: white; cursor: pointer;">Close</button>
-              </div>
-            </div>
-          </div>
-          <!-- Habits will be rendered here -->
-          <div class="habit-placeholder" style="text-align: center; padding: 3rem 1rem; color: var(--text-dim);">
-            <p>Tap + to start becoming who you want to be.</p>
-          </div>
-        </div>
-      </section>
-      <section id="journey-view" class="tab-content journey-container">
-        <h2 style="font-size: 0.9rem; color: var(--text-dim); text-transform: uppercase;">Your Journey</h2>
-        <div class="glass-card" style="padding: 2rem; text-align: center;">
-          <p style="color: var(--text-dim);">Journey visualization coming soon...</p>
-        </div>
-      </section>
-    </main>
-  </div>
-
-  <button id="add-habit-btn" class="fab">+</button>
-
-  <!-- Habit Creation Modal -->
-  <div id="modal-overlay" class="overlay">
-    <div class="modal glass-card">
-      <h2 id="modal-title" style="margin-bottom: 1.5rem;">New Habit</h2>
-      <input type="hidden" id="habit-id">
-
-      <div class="form-group" style="margin-bottom: 1.25rem;">
-        <label style="display: block; margin-bottom: 0.5rem; color: var(--text-dim); font-size: 0.8rem;">WHO DO YOU WANT
-          TO BECOME?</label>
-        <input type="text" id="habit-identity" placeholder="e.g. A focused reader"
-          style="width: 100%; padding: 0.75rem; background: rgba(255,255,255,0.05); border: 1px solid var(--glass-border); border-radius: 12px; color: white;">
-      </div>
-
-      <div class="form-group" style="margin-bottom: 1.25rem;">
-        <label style="display: block; margin-bottom: 0.5rem; color: var(--text-dim); font-size: 0.8rem;">THE TINY
-          ACTION</label>
-        <input type="text" id="habit-name" placeholder="e.g. Read 1 page"
-          style="width: 100%; padding: 0.75rem; background: rgba(255,255,255,0.05); border: 1px solid var(--glass-border); border-radius: 12px; color: white;">
-      </div>
-
-      <div class="form-group" style="margin-bottom: 1.5rem;">
-        <label style="display: block; margin-bottom: 0.5rem; color: var(--text-dim); font-size: 0.8rem;">THE ANCHOR
-          TRIGGER</label>
-        <input type="text" id="habit-anchor" placeholder="e.g. After I pour my coffee"
-          style="width: 100%; padding: 0.75rem; background: rgba(255,255,255,0.05); border: 1px solid var(--glass-border); border-radius: 12px; color: white;">
-      </div>
-
-      <div style="display: flex; gap: 0.5rem; justify-content: flex-end; margin-top: 2rem;">
-        <button id="delete-habit-btn"
-          style="flex: 1; padding: 0.75rem; background: rgba(248, 113, 113, 0.2); border: 1px solid rgba(248, 113, 113, 0.4); border-radius: 12px; color: #f87171; cursor: pointer; display: none;">Delete</button>
-        <button id="cancel-btn"
-          style="flex: 1; padding: 0.75rem; background: none; border: 1px solid var(--glass-border); border-radius: 12px; color: white; cursor: pointer;">Cancel</button>
-        <button id="save-habit-btn"
-          style="flex: 2; padding: 0.75rem; background: var(--primary-glow); border: none; border-radius: 12px; color: white; cursor: pointer; font-weight: 600;">Save</button>
-      </div>
-    </div>
-  </div>
-
-  <script src="js/store.js"></script>
-
-  <script src="js/store.js"></script>
-  <script src="js/sync.js"></script>
-  <script src="js/app.js"></script>
+    <script type="module" src="js/app.js"></script>
 </body>
 
 </html>

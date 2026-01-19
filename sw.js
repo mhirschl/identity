@@ -1,23 +1,19 @@
-const CACHE_NAME = 'identity-habit-v3';
+const CACHE_NAME = 'identity-v2-cache-v1';
 const ASSETS = [
     './',
     './index.html',
-    './css/style.css',
     './js/app.js',
-    './js/sync.js', // Added sync.js to cache
-    './js/store.js',
     './manifest.json',
-    './assets/icon-192.png',
-    './assets/icon-512.png'
+    './assets/icon-192.png'
 ];
 
 self.addEventListener('install', (event) => {
-    self.skipWaiting(); // Force new service worker to take over immediately
     event.waitUntil(
         caches.open(CACHE_NAME).then((cache) => {
             return cache.addAll(ASSETS);
         })
     );
+    self.skipWaiting();
 });
 
 self.addEventListener('activate', (event) => {
@@ -26,16 +22,18 @@ self.addEventListener('activate', (event) => {
             return Promise.all(
                 cacheNames.map((cacheName) => {
                     if (cacheName !== CACHE_NAME) {
-                        console.log('Clearing old cache:', cacheName);
                         return caches.delete(cacheName);
                     }
                 })
             );
-        }).then(() => self.clients.claim()) // Take control of all pages immediately
+        })
     );
+    self.clients.claim();
 });
 
 self.addEventListener('fetch', (event) => {
+    // We use network-first or stale-while-revalidate depending on the logic
+    // For now, standard respondWith caches.match then fetch
     event.respondWith(
         caches.match(event.request).then((response) => {
             return response || fetch(event.request);
