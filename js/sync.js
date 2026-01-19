@@ -7,12 +7,13 @@ const SyncEngine = (() => {
     // Note: These are placeholder keys. In a production environment, 
     // the user would provide their own Firebase config.
     const firebaseConfig = {
-        apiKey: "AIzaSy_MOCK_KEY",
-        authDomain: "identity-habit-manager.firebaseapp.com",
-        projectId: "identity-habit-manager",
-        storageBucket: "identity-habit-manager.appspot.com",
-        messagingSenderId: "123456789",
-        appId: "1:123456789:web:abcdef"
+        apiKey: "AIzaSyDBNRnKHOJpQMfhOvQOZsvu5ITOMbO6-Fs",
+        authDomain: "identity-habits.firebaseapp.com",
+        projectId: "identity-habits",
+        storageBucket: "identity-habits.firebasestorage.app",
+        messagingSenderId: "91092411242",
+        appId: "1:91092411242:web:96d01e74e32e9a44ea7b13",
+        measurementId: "G-B0ZB2SSJHM"
     };
 
     let db;
@@ -54,14 +55,40 @@ const SyncEngine = (() => {
         }
     }
 
+    async function loginWithGoogle() {
+        if (!auth) return { error: "Firebase not initialized. Check your config." };
+        if (firebaseConfig.apiKey.includes("MOCK")) {
+            return { error: "MOCK KEYS DETECTED: You must replace the keys in sync.js with your own Firebase keys from the Google Console." };
+        }
+        try {
+            const provider = new firebase.auth.GoogleAuthProvider();
+            const result = await auth.signInWithPopup(provider);
+            return { user: result.user };
+        } catch (e) {
+            console.error("Google Auth failed:", e);
+            return { error: e.message };
+        }
+    }
+
     async function loginAnonymous() {
-        if (!auth) return;
+        if (!auth) return { error: "Firebase not initialized. Check your config." };
+        if (firebaseConfig.apiKey.includes("MOCK")) {
+            return { error: "MOCK KEYS DETECTED: You must replace the keys in sync.js with your own Firebase keys from the Google Console." };
+        }
         try {
             const result = await auth.signInAnonymously();
-            return result.user;
+            return { user: result.user };
         } catch (e) {
             console.error("Auth failed:", e);
+            return { error: e.message };
         }
+    }
+
+    async function logout() {
+        if (!auth) return;
+        await auth.signOut();
+        localStorage.removeItem('identity_sync_key');
+        location.reload();
     }
 
     function startSync() {

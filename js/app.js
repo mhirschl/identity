@@ -28,6 +28,8 @@ const closeSyncBtn = document.getElementById('close-sync-btn');
 const copySyncBtn = document.getElementById('copy-sync-btn');
 const linkDeviceBtn = document.getElementById('link-device-btn');
 const linkKeyInput = document.getElementById('link-key-input');
+const googleSyncBtn = document.getElementById('google-sync-btn');
+const logoutBtn = document.getElementById('logout-btn');
 
 function init() {
     render();
@@ -104,11 +106,34 @@ function init() {
         syncModal.classList.remove('active');
     });
 
+    googleSyncBtn.addEventListener('click', async () => {
+        googleSyncBtn.innerText = "Signing in...";
+        const result = await window.SyncEngine.loginWithGoogle();
+        if (result.user) {
+            updateSyncUI();
+        } else if (result.error) {
+            googleSyncBtn.innerHTML = `
+                <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" width="18" height="18" alt="G">
+                Sign in with Google
+            `;
+            showErrorToast(result.error);
+        }
+    });
+
     enableSyncBtn.addEventListener('click', async () => {
         enableSyncBtn.innerText = "Connecting...";
-        const user = await window.SyncEngine.loginAnonymous();
-        if (user) {
+        const result = await window.SyncEngine.loginAnonymous();
+        if (result.user) {
             updateSyncUI();
+        } else if (result.error) {
+            enableSyncBtn.innerText = "Or use Anonymous Sync (Key-based)";
+            showErrorToast(result.error);
+        }
+    });
+
+    logoutBtn.addEventListener('click', () => {
+        if (confirm("Sign out of sync? This will reload the app.")) {
+            window.SyncEngine.logout();
         }
     });
 
@@ -323,11 +348,13 @@ function showErrorToast(message) {
 function updateSyncUI() {
     const key = window.SyncEngine.getSyncKey();
     if (key) {
-        enableSyncBtn.style.display = 'none';
+        googleSyncBtn.style.display = 'none';
+        enableSyncBtn.parentElement.style.display = 'none';
         syncKeyDisplay.style.display = 'block';
         syncKeyInput.value = key;
         syncStatusBtn.style.opacity = '1';
         syncStatusBtn.innerHTML = '☁️ Synced';
+        logoutBtn.style.display = 'block';
     }
 }
 
