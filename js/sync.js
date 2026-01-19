@@ -42,12 +42,26 @@ const SyncEngine = (() => {
                 return;
             }
 
+            // Handle Redirect Result (for Google Login)
+            auth.getRedirectResult().then(result => {
+                if (result.user) {
+                    currentUser = result.user;
+                    console.log("Redirect login successful:", currentUser.uid);
+                    startSync();
+                }
+            }).catch(e => {
+                console.error("Redirect Auth Error:", e);
+                // We'll show this via the UI if needed
+            });
+
             // Try to restore session or start anonymous
             auth.onAuthStateChanged(user => {
                 if (user) {
                     currentUser = user;
                     console.log("Synced as:", user.uid);
                     startSync();
+                    // Update UI if app.js is ready
+                    if (window.updateSyncUI) window.updateSyncUI();
                 }
             });
         } catch (e) {
@@ -62,23 +76,11 @@ const SyncEngine = (() => {
         }
         try {
             const provider = new firebase.auth.GoogleAuthProvider();
-            // Try popup first
-            const result = await auth.signInWithPopup(provider);
-            return { user: result.user };
+            // Using Redirect instead of Popup for better mobile/PWA support
+            await auth.signInWithRedirect(provider);
+            return { redirecting: true };
         } catch (e) {
             console.error("Google Auth Error:", e.code, e.message);
-
-            // Handle specific common blocking errors
-            if (e.code === 'auth/unauthorized-domain') {
-                return { error: `DOMAIN NOT AUTHORIZED: You must add 'mhirschl.github.io' to the "Authorized domains" list in Firebase Auth Settings.` };
-            }
-            if (e.code === 'auth/popup-blocked') {
-                return { error: "POPUP BLOCKED: Please allow popups for this site or try again." };
-            }
-            if (e.code === 'auth/popup-closed-by-user') {
-                return { error: "Login cancelled." };
-            }
-
             return { error: `Auth Error (${e.code}): ${e.message}` };
         }
     }

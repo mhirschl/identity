@@ -107,10 +107,12 @@ function init() {
     });
 
     googleSyncBtn.addEventListener('click', async () => {
-        googleSyncBtn.innerText = "Signing in...";
+        googleSyncBtn.innerText = "Redirecting to Google...";
         const result = await window.SyncEngine.loginWithGoogle();
         if (result.user) {
             updateSyncUI();
+        } else if (result.redirecting) {
+            // Browser is redirecting, we don't need to do anything
         } else if (result.error) {
             googleSyncBtn.innerHTML = `
                 <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" width="18" height="18" alt="G">
