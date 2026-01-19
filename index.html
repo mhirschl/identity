@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Identity - Habit Manager</title>
+  <link rel="stylesheet" href="css/style.css">
+  <link rel="manifest" href="manifest.json">
+  <link rel="apple-touch-icon" href="assets/icon-192.png">
+  <meta name="theme-color" content="#0a0a0c">
+</head>
+
+<body>
+  <div class="app-container">
+    <header>
+      <h1>Identity</h1>
+      <div id="sync-status" class="status-indicator" style="cursor: pointer; opacity: 0.5;">☁️ Sync</div>
+      <div id="stats" class="status-indicator"></div>
+    </header>
+
+    <nav class="tabs">
+      <div class="tab active" data-tab="today">Today</div>
+      <div class="tab" data-tab="journey">Journey</div>
+    </nav>
+
+    <main>
+      <section id="today-view" class="tab-content active">
+        <h2
+          style="margin-bottom: 1rem; font-size: 0.9rem; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.05em;">
+          Today's Intentions</h2>
+        <div id="habit-list" class="habit-list">
+          <!-- Sync Modal -->
+          <div id="sync-modal" class="overlay">
+            <div class="modal glass-card">
+              <h2 style="margin-bottom: 1rem;">Cross-Device Sync</h2>
+              <p style="color: var(--text-dim); font-size: 0.9rem; margin-bottom: 1.5rem;">
+                Sync your habits between your laptop and Pixel 10.
+              </p>
+
+              <div id="sync-info" style="margin-bottom: 2rem;">
+                <button id="enable-sync-btn"
+                  style="width: 100%; padding: 0.75rem; background: var(--secondary-glow); border: none; border-radius: 12px; color: var(--bg-dark); font-weight: 600; cursor: pointer;">Enable
+                  Cloud Sync</button>
+              </div>
+
+              <div id="sync-key-display" style="display: none; margin-bottom: 1.5rem;">
+                <label style="display: block; margin-bottom: 0.5rem; color: var(--text-dim); font-size: 0.8rem;">YOUR
+                  SYNC KEY</label>
+                <div style="display: flex; gap: 0.5rem;">
+                  <input type="text" id="sync-key-input" readonly
+                    style="flex: 1; padding: 0.75rem; background: rgba(255,255,255,0.05); border: 1px solid var(--glass-border); border-radius: 12px; color: white; font-family: monospace;">
+                  <button id="copy-sync-btn"
+                    style="padding: 0.75rem; background: var(--glass-bg); border: 1px solid var(--glass-border); border-radius: 12px; color: white;">Copy</button>
+                </div>
+                <p style="font-size: 0.7rem; color: var(--text-dim); margin-top: 0.5rem;">Enter this key on your other
+                  device to link them.</p>
+              </div>
+
+              <div id="link-device-section"
+                style="border-top: 1px solid var(--glass-border); padding-top: 1.5rem; margin-top: 1.5rem;">
+                <label style="display: block; margin-bottom: 0.5rem; color: var(--text-dim); font-size: 0.8rem;">LINK
+                  ANOTHER DEVICE</label>
+                <div style="display: flex; gap: 0.5rem;">
+                  <input type="text" id="link-key-input" placeholder="Paste Sync Key here..."
+                    style="flex: 1; padding: 0.75rem; background: rgba(255,255,255,0.05); border: 1px solid var(--glass-border); border-radius: 12px; color: white;">
+                  <button id="link-device-btn"
+                    style="padding: 0.75rem; background: var(--glass-bg); border: 1px solid var(--glass-border); border-radius: 12px; color: white;">Link</button>
+                </div>
+              </div>
+
+              <div style="text-align: right; margin-top: 2rem;">
+                <button id="close-sync-btn"
+                  style="padding: 0.75rem 1.5rem; background: none; border: 1px solid var(--glass-border); border-radius: 12px; color: white; cursor: pointer;">Close</button>
+              </div>
+            </div>
+          </div>
+          <!-- Habits will be rendered here -->
+          <div class="habit-placeholder" style="text-align: center; padding: 3rem 1rem; color: var(--text-dim);">
+            <p>Tap + to start becoming who you want to be.</p>
+          </div>
+        </div>
+      </section>
+      <section id="journey-view" class="tab-content journey-container">
+        <h2 style="font-size: 0.9rem; color: var(--text-dim); text-transform: uppercase;">Your Journey</h2>
+        <div class="glass-card" style="padding: 2rem; text-align: center;">
+          <p style="color: var(--text-dim);">Journey visualization coming soon...</p>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <button id="add-habit-btn" class="fab">+</button>
+
+  <!-- Habit Creation Modal -->
+  <div id="modal-overlay" class="overlay">
+    <div class="modal glass-card">
+      <h2 id="modal-title" style="margin-bottom: 1.5rem;">New Habit</h2>
+      <input type="hidden" id="habit-id">
+
+      <div class="form-group" style="margin-bottom: 1.25rem;">
+        <label style="display: block; margin-bottom: 0.5rem; color: var(--text-dim); font-size: 0.8rem;">WHO DO YOU WANT
+          TO BECOME?</label>
+        <input type="text" id="habit-identity" placeholder="e.g. A focused reader"
+          style="width: 100%; padding: 0.75rem; background: rgba(255,255,255,0.05); border: 1px solid var(--glass-border); border-radius: 12px; color: white;">
+      </div>
+
+      <div class="form-group" style="margin-bottom: 1.25rem;">
+        <label style="display: block; margin-bottom: 0.5rem; color: var(--text-dim); font-size: 0.8rem;">THE TINY
+          ACTION</label>
+        <input type="text" id="habit-name" placeholder="e.g. Read 1 page"
+          style="width: 100%; padding: 0.75rem; background: rgba(255,255,255,0.05); border: 1px solid var(--glass-border); border-radius: 12px; color: white;">
+      </div>
+
+      <div class="form-group" style="margin-bottom: 1.5rem;">
+        <label style="display: block; margin-bottom: 0.5rem; color: var(--text-dim); font-size: 0.8rem;">THE ANCHOR
+          TRIGGER</label>
+        <input type="text" id="habit-anchor" placeholder="e.g. After I pour my coffee"
+          style="width: 100%; padding: 0.75rem; background: rgba(255,255,255,0.05); border: 1px solid var(--glass-border); border-radius: 12px; color: white;">
+      </div>
+
+      <div style="display: flex; gap: 0.5rem; justify-content: flex-end; margin-top: 2rem;">
+        <button id="delete-habit-btn"
+          style="flex: 1; padding: 0.75rem; background: rgba(248, 113, 113, 0.2); border: 1px solid rgba(248, 113, 113, 0.4); border-radius: 12px; color: #f87171; cursor: pointer; display: none;">Delete</button>
+        <button id="cancel-btn"
+          style="flex: 1; padding: 0.75rem; background: none; border: 1px solid var(--glass-border); border-radius: 12px; color: white; cursor: pointer;">Cancel</button>
+        <button id="save-habit-btn"
+          style="flex: 2; padding: 0.75rem; background: var(--primary-glow); border: none; border-radius: 12px; color: white; cursor: pointer; font-weight: 600;">Save</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Firebase SDKs -->
+  <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore-compat.js"></script>
+
+  <script src="js/store.js"></script>
+  <script src="js/sync.js"></script>
+  <script src="js/app.js"></script>
+</body>
+
+</html>
