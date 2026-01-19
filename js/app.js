@@ -21,15 +21,7 @@ const anchorInput = document.getElementById('habit-anchor');
 // Sync UI
 const syncStatusBtn = document.getElementById('sync-status');
 const syncModal = document.getElementById('sync-modal');
-const enableSyncBtn = document.getElementById('enable-sync-btn');
-const syncKeyDisplay = document.getElementById('sync-key-display');
-const syncKeyInput = document.getElementById('sync-key-input');
 const closeSyncBtn = document.getElementById('close-sync-btn');
-const copySyncBtn = document.getElementById('copy-sync-btn');
-const linkDeviceBtn = document.getElementById('link-device-btn');
-const linkKeyInput = document.getElementById('link-key-input');
-const googleSyncBtn = document.getElementById('google-sync-btn');
-const logoutBtn = document.getElementById('logout-btn');
 
 function init() {
     render();
@@ -101,7 +93,7 @@ function init() {
         showErrorToast(e.detail.message);
     });
 
-    // Sync Handlers
+    // Sync Modal Controls
     syncStatusBtn.addEventListener('click', () => {
         syncModal.classList.add('active');
         updateSyncUI();
@@ -111,50 +103,35 @@ function init() {
         syncModal.classList.remove('active');
     });
 
-    googleSyncBtn.addEventListener('click', async () => {
-        googleSyncBtn.innerText = "Redirecting to Google...";
-        const result = await window.SyncEngine.loginWithGoogle();
-        if (result.user) {
+    // GitHub Sync Handlers
+    const githubTokenInput = document.getElementById('github-token-input');
+    const githubConnectBtn = document.getElementById('github-connect-btn');
+    const githubLogoutBtn = document.getElementById('github-logout-btn');
+    const githubAuthSection = document.getElementById('github-auth-section');
+    const githubStatusSection = document.getElementById('github-status-section');
+
+    githubConnectBtn.addEventListener('click', async () => {
+        const token = githubTokenInput.value.trim();
+        if (!token) {
+            showErrorToast("Please enter a GitHub Token");
+            return;
+        }
+
+        githubConnectBtn.innerText = "Connecting...";
+        const result = await window.SyncEngine.connect(token);
+
+        if (result.success) {
             updateSyncUI();
-        } else if (result.redirecting) {
-            // Browser is redirecting, we don't need to do anything
-        } else if (result.error) {
-            googleSyncBtn.innerHTML = `
-                <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" width="18" height="18" alt="G">
-                Sign in with Google
-            `;
+            githubTokenInput.value = '';
+        } else {
+            githubConnectBtn.innerText = "Connect GitHub";
             showErrorToast(result.error);
         }
     });
 
-    enableSyncBtn.addEventListener('click', async () => {
-        enableSyncBtn.innerText = "Connecting...";
-        const result = await window.SyncEngine.loginAnonymous();
-        if (result.user) {
-            updateSyncUI();
-        } else if (result.error) {
-            enableSyncBtn.innerText = "Or use Anonymous Sync (Key-based)";
-            showErrorToast(result.error);
-        }
-    });
-
-    logoutBtn.addEventListener('click', () => {
-        if (confirm("Sign out of sync? This will reload the app.")) {
+    githubLogoutBtn.addEventListener('click', () => {
+        if (confirm("Logout from GitHub sync?")) {
             window.SyncEngine.logout();
-        }
-    });
-
-    copySyncBtn.addEventListener('click', () => {
-        syncKeyInput.select();
-        document.execCommand('copy');
-        copySyncBtn.innerText = "Copied!";
-        setTimeout(() => copySyncBtn.innerText = "Copy", 2000);
-    });
-
-    linkDeviceBtn.addEventListener('click', () => {
-        const key = linkKeyInput.value.trim();
-        if (key) {
-            window.SyncEngine.bridgeDevice(key);
         }
     });
 }
@@ -353,26 +330,20 @@ function showErrorToast(message) {
 }
 
 function updateSyncUI() {
-    const key = window.SyncEngine.getSyncKey();
-    if (key) {
-        googleSyncBtn.style.display = 'none';
-        enableSyncBtn.parentElement.style.display = 'none';
-        syncKeyDisplay.style.display = 'block';
-        syncKeyInput.value = key;
+    // Re-select elements in case they were removed/added (or just use local references if possible)
+    const githubAuthSection = document.getElementById('github-auth-section');
+    const githubStatusSection = document.getElementById('github-status-section');
+
+    if (window.SyncEngine.isConnected()) {
+        githubAuthSection.style.display = 'none';
+        githubStatusSection.style.display = 'block';
         syncStatusBtn.style.opacity = '1';
         syncStatusBtn.innerHTML = '☁️ Synced';
-        logoutBtn.style.display = 'block';
-
-        // Hide link section if already synced to avoid confusion
-        document.getElementById('link-device-section').style.display = 'none';
     } else {
-        googleSyncBtn.style.display = 'flex';
-        enableSyncBtn.parentElement.style.display = 'block';
-        syncKeyDisplay.style.display = 'none';
+        githubAuthSection.style.display = 'block';
+        githubStatusSection.style.display = 'none';
         syncStatusBtn.style.opacity = '0.5';
         syncStatusBtn.innerHTML = '☁️ Sync';
-        logoutBtn.style.display = 'none';
-        document.getElementById('link-device-section').style.display = 'block';
     }
 }
 

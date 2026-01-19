@@ -1,147 +1,131 @@
 /**
- * Identity Sync Engine
- * Handles real-time cloud mobilization via Firebase
+ * Identity GitHub Sync Engine
+ * Uses GitHub API to store habits.json in the user's repository.
  */
 
 const SyncEngine = (() => {
-    // Note: These are placeholder keys. In a production environment, 
-    // the user would provide their own Firebase config.
-    const firebaseConfig = {
-        apiKey: "AIzaSyDBNRnKHOJpQMfhOvQOZsvu5ITOMbO6-Fs",
-        authDomain: "identity-habits.firebaseapp.com",
-        projectId: "identity-habits",
-        storageBucket: "identity-habits.firebasestorage.app",
-        messagingSenderId: "91092411242",
-        appId: "1:91092411242:web:96d01e74e32e9a44ea7b13",
-        measurementId: "G-B0ZB2SSJHM"
-    };
+    const REPO_OWNER = 'mhirschl';
+    const REPO_NAME = 'identity';
+    const FILE_PATH = 'habits.json';
 
-    let db;
-    let auth;
-    let currentUser = null;
+    let githubToken = localStorage.getItem('identity_github_token');
+    let fileSha = null;
 
     async function init() {
-        if (typeof firebase === 'undefined') {
-            console.warn("Firebase not loaded. Working in local-only mode.");
-            return;
-        }
-
-        try {
-            if (!firebase.apps.length) {
-                firebase.initializeApp(firebaseConfig);
+        if (githubToken) {
+            console.log("GitHub token found. Initializing sync...");
+            const success = await refreshSession();
+            if (success) {
+                window.IdentityStore.setCloudMode(true);
+                if (window.updateSyncUI) window.updateSyncUI();
             }
-            db = firebase.firestore();
-            auth = firebase.auth();
-
-            // 1. Enable Persistence (The "Magic" part for offline sync)
-            try {
-                await db.enablePersistence({ synchronizeTabs: true });
-                console.log("Firestore persistence enabled (multi-tab sync active)");
-            } catch (err) {
-                if (err.code === 'failed-precondition') {
-                    console.warn("Multiple tabs open, persistence can only be enabled in one tab at a time.");
-                } else if (err.code === 'unimplemented') {
-                    console.warn("The current browser does not support persistence.");
-                }
-            }
-
-            // 2. Handle Redirect Result (for Google Login)
-            auth.getRedirectResult().then(result => {
-                if (result.user) {
-                    onUserAuthenticated(result.user);
-                }
-            }).catch(e => {
-                console.error("Redirect Auth Error:", e);
-            });
-
-            // 3. Listen for Auth State
-            auth.onAuthStateChanged(user => {
-                if (user) {
-                    onUserAuthenticated(user);
-                } else {
-                    currentUser = null;
-                    window.IdentityStore.setCloudMode(false);
-                }
-            });
-        } catch (e) {
-            console.error("Firebase init failed:", e);
         }
     }
 
-    async function onUserAuthenticated(user) {
-        currentUser = user;
-        console.log("Authenticated as:", user.uid);
-
-        // Let the store know we are in cloud mode
-        window.IdentityStore.setCloudMode(true, user.uid);
-
-        // One-time migration: If there are local habits and cloud is empty, migrate them
-        migrateLocalToCloud(user.uid);
-
-        // Update UI
-        if (window.updateSyncUI) window.updateSyncUI();
-    }
-
-    async function migrateLocalToCloud(uid) {
-        const localHabits = JSON.parse(localStorage.getItem('identity_habits')) || [];
-        if (localHabits.length === 0) return;
-
-        // Peak into cloud to see if it's empty
-        const snapshot = await db.collection('users').doc(uid).collection('habits').limit(1).get();
-        if (snapshot.empty) {
-            console.log("Cloud is empty. Migrating local habits...");
-            for (const habit of localHabits) {
-                await db.collection('users').doc(uid).collection('habits').doc(habit.id).set(habit);
-            }
-            // Clear local habits to prevent double-migration next time
-            localStorage.removeItem('identity_habits');
-        }
-    }
-
-    async function loginWithGoogle() {
-        if (!auth) return { error: "Firebase not initialized." };
-        try {
-            const provider = new firebase.auth.GoogleAuthProvider();
-            await auth.signInWithRedirect(provider);
-            return { redirecting: true };
-        } catch (e) {
-            console.error("Google Auth Error:", e.code, e.message);
-            return { error: `Auth Error: ${e.message}` };
-        }
-    }
-
-    async function loginAnonymous() {
-        if (!auth) return { error: "Firebase not initialized." };
-        try {
-            const result = await auth.signInAnonymously();
-            return { user: result.user };
-        } catch (e) {
-            return { error: e.message };
+    async function connect(token) {
+        githubToken = token;
+        const success = await refreshSession();
+        if (success) {
+            localStorage.setItem('identity_github_token', token);
+            window.IdentityStore.setCloudMode(true);
+            return { success: true };
+        } else {
+            githubToken = localStorage.getItem('identity_github_token');
+            return { error: "Invalid GitHub Token or Repository not found." };
         }
     }
 
     async function logout() {
-        if (!auth) return;
-        await auth.signOut();
+        localStorage.removeItem('identity_github_token');
+        githubToken = null;
         location.reload();
     }
 
-    function getSyncKey() {
-        return currentUser ? currentUser.uid : null;
+    async function refreshSession() {
+        try {
+            const response = await fetch(`https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/contents/${FILE_PATH}`, {
+                headers: {
+                    'Authorization': `token ${githubToken}`,
+                    'Accept': 'application/vnd.github.v3+json'
+                }
+            });
+
+            if (response.status === 200) {
+                const data = await response.json();
+                fileSha = data.sha;
+                const content = JSON.parse(atob(data.content));
+
+                // Update local store with cloud data
+                window.IdentityStore.habits = content;
+                window.IdentityStore.notify(true); // true = fromSync
+                return true;
+            } else if (response.status === 404) {
+                // File doesn't exist yet, we'll create it on first save
+                console.log("habits.json not found. Will create on first save.");
+                return true;
+            }
+            return false;
+        } catch (e) {
+            console.error("GitHub Sync Error:", e);
+            return false;
+        }
     }
 
-    // Helper for direct Firestore access from store
-    function getDB() { return db; }
-    function getUser() { return currentUser; }
+    async function saveToGitHub(habits) {
+        if (!githubToken) return;
+
+        try {
+            // First, get the latest SHA to avoid conflict
+            const getRes = await fetch(`https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/contents/${FILE_PATH}`, {
+                headers: {
+                    'Authorization': `token ${githubToken}`,
+                    'Accept': 'application/vnd.github.v3+json'
+                }
+            });
+
+            if (getRes.status === 200) {
+                const getData = await getRes.json();
+                fileSha = getData.sha;
+            }
+
+            const content = btoa(JSON.stringify(habits, null, 2));
+            const body = {
+                message: 'Update habits from Identity App',
+                content: content,
+                sha: fileSha
+            };
+
+            const response = await fetch(`https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/contents/${FILE_PATH}`, {
+                method: 'PUT',
+                headers: {
+                    'Authorization': `token ${githubToken}`,
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(body)
+            });
+
+            if (response.ok) {
+                const resData = await response.json();
+                fileSha = resData.content.sha;
+                console.log("Synced to GitHub successfully.");
+            } else {
+                console.error("GitHub Save Failed:", await response.text());
+            }
+        } catch (e) {
+            console.error("GitHub Save Error:", e);
+        }
+    }
+
+    function isConnected() {
+        return !!githubToken;
+    }
 
     return {
         init,
-        loginWithGoogle,
-        loginAnonymous,
+        connect,
         logout,
-        getSyncKey,
-        getDB,
-        getUser
+        saveToGitHub,
+        isConnected
     };
 })();
 

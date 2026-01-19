@@ -12,41 +12,12 @@ window.IdentityStore = (function () {
             this.unsubscribeCloud = null;
         }
 
-        setCloudMode(active, uid = null) {
+        setCloudMode(active) {
             this.isCloudMode = active;
-            this.userId = uid;
-
-            if (active && uid) {
-                this.initCloudListener();
-            } else {
-                if (this.unsubscribeCloud) this.unsubscribeCloud();
+            if (!active) {
                 this.habits = JSON.parse(localStorage.getItem('identity_habits')) || [];
                 this.notify();
             }
-        }
-
-        initCloudListener() {
-            if (this.unsubscribeCloud) this.unsubscribeCloud();
-
-            const db = window.SyncEngine.getDB();
-            if (!db || !this.userId) return;
-
-            this.unsubscribeCloud = db.collection('users').doc(this.userId)
-                .collection('habits')
-                .onSnapshot(snapshot => {
-                    const cloudHabits = [];
-                    snapshot.forEach(doc => cloudHabits.push(doc.data()));
-
-                    // Sort by order
-                    this.habits = cloudHabits.sort((a, b) => (a.order || 0) - (b.order || 0));
-
-                    // Update cache for offline startup
-                    localStorage.setItem('identity_habits', JSON.stringify(this.habits));
-
-                    this.notify(true); // true = from sync
-                }, err => {
-                    console.error("Cloud listener error:", err);
-                });
         }
 
         subscribe(listener) {
@@ -57,15 +28,20 @@ window.IdentityStore = (function () {
         }
 
         notify(fromSync = false) {
-            if (!this.isCloudMode && !fromSync) this.save();
+            this.save();
             this.listeners.forEach(l => l(this.habits));
+
+            // Push to GitHub if connected
+            if (!fromSync && window.SyncEngine.isConnected()) {
+                window.SyncEngine.saveToGitHub(this.habits);
+            }
         }
 
         save() {
             localStorage.setItem('identity_habits', JSON.stringify(this.habits));
         }
 
-        async addHabit(habitData) {
+        addHabit(habitData) {
             const id = crypto.randomUUID();
             const newHabit = {
                 id: id,
@@ -81,39 +57,24 @@ window.IdentityStore = (function () {
                 ...habitData
             };
 
-            if (this.isCloudMode) {
-                const db = window.SyncEngine.getDB();
-                await db.collection('users').doc(this.userId).collection('habits').doc(id).set(newHabit);
-            } else {
-                this.habits.push(newHabit);
+            this.habits.push(newHabit);
+            this.notify();
+        }
+
+        updateHabit(id, updateData) {
+            const index = this.habits.findIndex(h => h.id === id);
+            if (index !== -1) {
+                this.habits[index] = { ...this.habits[index], ...updateData };
                 this.notify();
             }
         }
 
-        async updateHabit(id, updateData) {
-            if (this.isCloudMode) {
-                const db = window.SyncEngine.getDB();
-                await db.collection('users').doc(this.userId).collection('habits').doc(id).update(updateData);
-            } else {
-                const index = this.habits.findIndex(h => h.id === id);
-                if (index !== -1) {
-                    this.habits[index] = { ...this.habits[index], ...updateData };
-                    this.notify();
-                }
-            }
+        deleteHabit(id) {
+            this.habits = this.habits.filter(h => h.id !== id);
+            this.notify();
         }
 
-        async deleteHabit(id) {
-            if (this.isCloudMode) {
-                const db = window.SyncEngine.getDB();
-                await db.collection('users').doc(this.userId).collection('habits').doc(id).delete();
-            } else {
-                this.habits = this.habits.filter(h => h.id !== id);
-                this.notify();
-            }
-        }
-
-        async toggleHabit(id, dateString) {
+        toggleHabit(id, dateString) {
             const habit = this.habits.find(h => h.id === id);
             if (!habit) return;
 
@@ -125,16 +86,11 @@ window.IdentityStore = (function () {
                 this.checkReward(habit);
             }
 
-            if (this.isCloudMode) {
-                const db = window.SyncEngine.getDB();
-                await db.collection('users').doc(this.userId).collection('habits').doc(id).update({ history: newHistory });
-            } else {
-                habit.history = newHistory;
-                this.notify();
-            }
+            habit.history = newHistory;
+            this.notify();
         }
 
-        async skipHabit(id, dateString) {
+        skipHabit(id, dateString) {
             const habit = this.habits.find(h => h.id === id);
             if (!habit) return;
 
@@ -142,20 +98,9 @@ window.IdentityStore = (function () {
             const skipsUsed = habit.skipsUsed[weekKey] || 0;
 
             if (skipsUsed < habit.skipBudget) {
-                const newHistory = { ...habit.history, [dateString]: 'skipped' };
-                const newSkipsUsed = { ...habit.skipsUsed, [weekKey]: skipsUsed + 1 };
-
-                if (this.isCloudMode) {
-                    const db = window.SyncEngine.getDB();
-                    await db.collection('users').doc(this.userId).collection('habits').doc(id).update({
-                        history: newHistory,
-                        skipsUsed: newSkipsUsed
-                    });
-                } else {
-                    habit.history = newHistory;
-                    habit.skipsUsed = newSkipsUsed;
-                    this.notify();
-                }
+                habit.history = { ...habit.history, [dateString]: 'skipped' };
+                habit.skipsUsed = { ...habit.skipsUsed, [weekKey]: skipsUsed + 1 };
+                this.notify();
             } else {
                 window.dispatchEvent(new CustomEvent('habit-error', {
                     detail: { message: "Skip budget exhausted for this week!" }
