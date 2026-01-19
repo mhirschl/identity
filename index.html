@@ -89,7 +89,9 @@
     }
     </script>
 
-    <script type="module" src="js/app.js"></script>
+    <!-- Transpiler for JSX (Zero-Build) -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script type="text/babel" data-type="module" src="js/app.js"></script>
 </body>
 
 </html>
