@@ -159,7 +159,9 @@ const SyncEngine = (() => {
 
     return {
         init,
+        loginWithGoogle,
         loginAnonymous,
+        logout,
         getSyncKey
     };
 })();
