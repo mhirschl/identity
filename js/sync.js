@@ -58,15 +58,28 @@ const SyncEngine = (() => {
     async function loginWithGoogle() {
         if (!auth) return { error: "Firebase not initialized. Check your config." };
         if (firebaseConfig.apiKey.includes("MOCK")) {
-            return { error: "MOCK KEYS DETECTED: You must replace the keys in sync.js with your own Firebase keys from the Google Console." };
+            return { error: "MOCK KEYS DETECTED: Update help in js/sync.js" };
         }
         try {
             const provider = new firebase.auth.GoogleAuthProvider();
+            // Try popup first
             const result = await auth.signInWithPopup(provider);
             return { user: result.user };
         } catch (e) {
-            console.error("Google Auth failed:", e);
-            return { error: e.message };
+            console.error("Google Auth Error:", e.code, e.message);
+
+            // Handle specific common blocking errors
+            if (e.code === 'auth/unauthorized-domain') {
+                return { error: `DOMAIN NOT AUTHORIZED: You must add 'mhirschl.github.io' to the "Authorized domains" list in Firebase Auth Settings.` };
+            }
+            if (e.code === 'auth/popup-blocked') {
+                return { error: "POPUP BLOCKED: Please allow popups for this site or try again." };
+            }
+            if (e.code === 'auth/popup-closed-by-user') {
+                return { error: "Login cancelled." };
+            }
+
+            return { error: `Auth Error (${e.code}): ${e.message}` };
         }
     }
 
